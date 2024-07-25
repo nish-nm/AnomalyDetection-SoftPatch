@@ -1,9 +1,9 @@
 ### Updated code:
 - Resolved scripts
 - Added dockerfile to help with code dependencies and python enviornment
-- - ``` docker build -t [your-image-name] . ``` to build docker image
-- - ```docker run``` to start container
-- - ```docker stop [container-id]```  to stop the container
+  - ``` docker build -t [your-image-name] . ``` to build docker image
+  - ```docker run``` to start container
+  - ```docker stop [container-id]```  to stop the container
 - gitignore
 - Dice Score calculation {WIP}
 - Code to plot ROC curves
