@@ -22,8 +22,8 @@ import src.softpatch as softpatch
 import src.datasets as datasets
 LOGGER = logging.getLogger(__name__)
 
-_DATASETS = {"mvtec": ["datasets.mvtec", "MVTecDataset"],
-             "btad": ["datasets.btad", "BTADDataset"]}
+_DATASETS = {"mvtec": ["src.datasets.mvtec", "MVTecDataset"],
+             "btad": ["src.datasets.btad", "BTADDataset"]}
 
 
 def parse_args():
@@ -41,7 +41,7 @@ def parse_args():
     # coreset sampler
     parser.add_argument("--sampler_name", type=str, default="approx_greedy_coreset")
     parser.add_argument("--sampling_ratio", type=float, default=0.1)
-    parser.add_argument("--faiss_on_gpu", action='store_true')
+    parser.add_argument("--faiss_on_gpu")
     parser.add_argument("--faiss_num_workers", type=int, default=4)
     # SoftPatch hyper-parameter
     parser.add_argument("--weight_method", type=str, default="lof")
@@ -73,7 +73,6 @@ def get_dataloaders(args):
     overlap = args.overlap
     noise_augmentation = args.noise_augmentation
     fold = args.fold
-
 
     dataset_info = _DATASETS[args.dataset]
     dataset_library = __import__(dataset_info[0], fromlist=[dataset_info[1]])
@@ -125,7 +124,6 @@ def get_dataloaders(args):
                 test_dataset = Subset(test_dataset, new_test_data_index)
             else:
                 test_dataset = Subset(test_dataset, range(len(test_dataset)))
-
 
         train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
@@ -227,6 +225,7 @@ def run(args):
     )
 
     result_collect = []
+    dice_scores_collect = []
 
     for dataloader_count, dataloaders in enumerate(list_of_dataloaders):
         dataset_name = dataloaders["training"].name
@@ -239,8 +238,6 @@ def run(args):
         )
         start_time = time.time()
         utils.fix_seeds(seed, device)
-
-
 
         with device_context:
             torch.cuda.empty_cache()
@@ -257,8 +254,6 @@ def run(args):
                 LOGGER.info(
                     "Training models ({}/{})".format(i + 1, len(coreset_list))
                 )
-                # for epoch in range(20):
-                #     coreset._train(dataloaders["training"])
                 coreset.fit(dataloaders["training"])
             train_end = time.time()
             torch.cuda.empty_cache()
@@ -296,16 +291,19 @@ def run(args):
             segmentations = (segmentations - min_scores) / (max_scores - min_scores)
             segmentations = np.mean(segmentations, axis=0)
 
-            # anomaly_labels = [
-            #     x[1] != "good" for x in dataloaders["testing"].dataset.data_to_iterate
-            # ]
-
             test_end = time.time()
             LOGGER.info("Training time:{}, Testing time:{}".format(train_end - start_time, test_end - train_end))
 
+            # Compute Dice Score
+            dice_score = metrics.compute_dice_score(segmentations, masks_gt)
+            dice_scores_collect.append({
+                "dataset_name": dataset_name,
+                "noise_level": args.noise,
+                "dice_score": dice_score,
+            })
+
             # (Optional) Plot example images.
             if args.save_segmentation_images:
-                # dataset = dataloaders["testing"].dataset
                 image_paths = [
                     x[2] for x in
                     dataloaders["testing"].dataset.dataset.data_to_iterate[dataloaders["testing"].dataset.indices]
@@ -342,37 +340,25 @@ def run(args):
                     mask_paths,
                     image_transform=image_transform,
                     mask_transform=mask_transform,
-                    # dataset=dataset
                 )
 
             LOGGER.info("Computing evaluation metrics.")
-            auroc = metrics.compute_imagewise_retrieval_metrics(
-                scores, labels_gt
-            )["auroc"]
+            auroc_metrics = metrics.compute_imagewise_retrieval_metrics(
+                scores, labels_gt, draw_roc_curve=True
+            )
+            auroc = auroc_metrics["auroc"]
 
             # Compute PRO score & PW Auroc for all images
             pixel_scores = metrics.compute_pixelwise_retrieval_metrics(
-                segmentations, masks_gt
+                segmentations, masks_gt, draw_roc_curve=True
             )
             full_pixel_auroc = pixel_scores["auroc"]
-
-            # Compute PRO score & PW Auroc only images with anomalies
-            # sel_idxs = []
-            # for i in range(len(masks_gt)):
-            #     if np.sum(masks_gt[i]) > 0:
-            #         sel_idxs.append(i)
-            # pixel_scores = coreset.metrics.compute_pixelwise_retrieval_metrics(
-            #     [segmentations[i] for i in sel_idxs],
-            #     [masks_gt[i] for i in sel_idxs],
-            # )
-            # anomaly_pixel_auroc = pixel_scores["auroc"]
 
             result_collect.append(
                 {
                     "dataset_name": dataset_name,
                     "image_auroc": auroc,
                     "pixel_auroc": full_pixel_auroc,
-                    # "anomaly_pixel_auroc": anomaly_pixel_auroc,
                 }
             )
 
@@ -392,6 +378,9 @@ def run(args):
         column_names=result_metric_names,
         row_names=result_dataset_names,
     )
+
+    # Plot Dice scores for different noise levels
+    utils.plot_dice_scores_vs_noise(dice_scores_collect, run_save_path)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

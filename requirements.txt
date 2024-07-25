@@ -1,5 +1,5 @@
 click>= 8.0.3
-cudatoolkit>= 10.2
+# cudatoolkit
 # faiss-cpu
 faiss-gpu
 matplotlib>= 3.5.0

@@ -1,4 +1,4 @@
-import timm  # noqa # NOCA:unused-import(used)
+# import timm  # noqa # NOCA:unused-import(used)
 import torchvision.models as models  # noqa # NOCA:unused-import(used)
 
 _BACKBONES = {
